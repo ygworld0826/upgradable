@@ -1,27 +1,54 @@
-import { ethers as hre } from 'hardhat'; // hardhat을 사용할 때 hre 라는 이름으로 사용합니다.
+// scripts/upgrade.ts
+import { ethers } from "hardhat";
 import { makeAbi } from './makeABI';
-import { ethers } from 'ethers';
-import { admin } from '../helper/test.helper';
-
-import Proxy from '../abis/Proxy.json';
+import * as fs from 'fs';
+import * as path from 'path';
 
 async function main() {
+  console.log("Starting upgrade process...");
+  
+  // Read the Proxy.json file
+  const proxyPath = path.join(__dirname, '../abis/Proxy.json');
+  if (!fs.existsSync(proxyPath)) {
+    throw new Error(`Proxy.json file not found at ${proxyPath}. Please run the deployment script first.`);
+  }
+  
+  const Proxy = JSON.parse(fs.readFileSync(proxyPath, 'utf8'));
+  console.log("Proxy contract address:", Proxy.address);
+  
+  // Get the signers from hardhat
+  const [admin] = await ethers.getSigners();
+  console.log("Performing upgrade with account:", admin.address);
+  console.log("Account balance:", (await admin.provider.getBalance(admin.address)).toString());
+  
+  // Create proxy contract instance
   const proxy = new ethers.Contract(Proxy.address, Proxy.abi, admin);
-  const V2 = await hre.getContractFactory('V2');
+  
+  // Get V2 contract factory
+  const V2 = await ethers.getContractFactory("V2", admin);
 
-  console.log('Deploying Contract...');
+  console.log('Deploying V2 implementation contract...');
+  
+  // Deploy V2 implementation
+  const v2 = await V2.deploy();
+  await v2.waitForDeployment();
+  const v2Address = await v2.getAddress();
+  console.log("V2 implementation deployed to:", v2Address);
+  
+  // Upgrade proxy to point to V2
+  console.log('Upgrading proxy to V2 implementation...');
+  const upgradeTx = await proxy.upgrade(v2Address);
+  console.log('Upgrade transaction sent:', upgradeTx.hash);
+  await upgradeTx.wait();
+  console.log('Proxy successfully upgraded to V2');
 
-  /*
-    Todo: 배포 스크립트(hardhat 사용)와 업그레이드(ethers 사용)를 완성시켜 주세요.
-
-    1) V2 컨트랙트를 배포하기 위한 스크립트를 완성 시킵니다.
-    2) 업그레이드를 실행합니다. Proxy 컨트랙트에서 upgrade 함수를 실행시켜야 합니다. 
-  */
-  const v2;
-
-  /* setting */
-  console.log('Contract deployed to:', v2.target);
-  await makeAbi('V2', `${proxy.target}`);
+  // Generate ABI file for V2
+  console.log("Updating contract information...");
+  await makeAbi('V2', Proxy.address);
+  
+  console.log("Upgrade completed successfully!");
+  console.log("V2 address:", v2Address);
+  console.log("Proxy address (unchanged):", Proxy.address);
 }
 
 main()
